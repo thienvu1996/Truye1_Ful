@@ -6,6 +6,7 @@ export const SOURCES = {
   truyenfull: {
     name: "truyenfull",
     label: "TruyenFull",
+    hostKeyword: "truyenfull",
     domains: [
       "https://truyenfull.today",
       "https://truyenfull.vision",
@@ -16,6 +17,7 @@ export const SOURCES = {
   metruyenchuvn: {
     name: "metruyenchuvn",
     label: "MeTruyenChuVN",
+    hostKeyword: "metruyenchuvn",
     domains: ["https://metruyenchuvn.com"],
   },
 } as const;
@@ -80,6 +82,16 @@ export function normalizePath(input: string) {
   return value.startsWith("/") ? value : `/${value}`;
 }
 
+function getInputOrigin(input: string) {
+  const value = input.trim();
+
+  if (!value.startsWith("http://") && !value.startsWith("https://")) {
+    return undefined;
+  }
+
+  return new URL(value).origin;
+}
+
 export function detectSource(input: string): SupportedSource {
   const value = input.trim();
 
@@ -89,6 +101,7 @@ export function detectSource(input: string): SupportedSource {
 
   const hostname = new URL(value).hostname.replace(/^www\./, "");
   const found = Object.entries(SOURCES).find(([, source]) =>
+    hostname.includes(source.hostKeyword) ||
     source.domains.some((domain) => new URL(domain).hostname.replace(/^www\./, "") === hostname),
   );
 
@@ -127,11 +140,13 @@ async function probeUrl(url: string) {
   }
 }
 
-function uniqueDomains(source: SupportedSource) {
+function uniqueDomains(source: SupportedSource, preferredDomain?: string) {
   const activeDomain = sourceHealth[source].activeDomain;
-  const domains = activeDomain
-    ? [activeDomain, ...SOURCES[source].domains]
-    : [...SOURCES[source].domains];
+  const domains = [
+    preferredDomain,
+    activeDomain,
+    ...SOURCES[source].domains,
+  ].filter(Boolean) as string[];
 
   return [...new Set(domains)];
 }
@@ -156,6 +171,8 @@ function canTrustRedirect(source: SupportedSource, originalDomain: string, final
   if (originalHost === finalHost) return true;
 
   if (source === "truyenfull" || source === "metruyenchuvn") {
+    if (finalHost.includes(SOURCES[source].hostKeyword)) return true;
+
     return SOURCES[source].domains.some((domain) => {
       const configuredHost = new URL(domain).hostname.replace(/^www\./, "");
       const root = configuredHost.split(".").slice(-2).join(".");
@@ -218,6 +235,7 @@ export async function getSourceHealth(source: SupportedSource = "truyenfull") {
 export async function resolveSourceUrl(input: string, sourceName?: SupportedSource) {
   const source = sourceName ?? detectSource(input);
   const sourcePath = normalizePath(input);
+  const inputOrigin = getInputOrigin(input);
 
   await hydrateSourceHealth(source);
 
@@ -225,7 +243,7 @@ export async function resolveSourceUrl(input: string, sourceName?: SupportedSour
     await checkSourceDomain(source);
   }
 
-  for (const domain of uniqueDomains(source)) {
+  for (const domain of uniqueDomains(source, inputOrigin)) {
     const url = `${domain}${sourcePath}`;
     const result = await probeUrl(url);
 
