@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { STORY_CATALOG } from "@/lib/story-catalog";
 import type { Chapter, ChapterListItem, StoryPayload } from "@/lib/types";
 
 type ApiResult<T> = {
@@ -16,10 +17,8 @@ type ChapterResponse = {
   chapter: Chapter;
 };
 
-const SAMPLE_URL = "https://truyenfull.vision/";
-
 export default function Home() {
-  const [url, setUrl] = useState(SAMPLE_URL);
+  const [url, setUrl] = useState<string>(STORY_CATALOG[0].url);
   const [from, setFrom] = useState("1");
   const [limit, setLimit] = useState("20");
   const [story, setStory] = useState<StoryPayload | null>(null);
@@ -27,24 +26,25 @@ export default function Home() {
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
 
-  async function loadStory(event?: FormEvent) {
+  async function loadStory(event?: FormEvent, nextUrl: string = url) {
     event?.preventDefault();
+    setUrl(nextUrl);
     setError("");
     setChapter(null);
-    setLoading("Đang lấy metadata và danh sách chương...");
+    setLoading("Loading story metadata and chapter list...");
 
     try {
-      const response = await fetch(`/api/v1/story?url=${encodeURIComponent(url)}`);
+      const response = await fetch(`/api/v1/story?url=${encodeURIComponent(nextUrl)}`);
       const json = (await response.json()) as ApiResult<StoryPayload>;
 
       if (!response.ok || !json.success || !json.data) {
-        throw new Error(json.error ?? "Không lấy được truyện");
+        throw new Error(json.error ?? "Cannot load story");
       }
 
       setStory(json.data);
     } catch (err) {
       setStory(null);
-      setError(err instanceof Error ? err.message : "Lỗi không xác định");
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading("");
     }
@@ -54,19 +54,19 @@ export default function Home() {
     if (!item.url) return;
 
     setError("");
-    setLoading(`Đang lấy ${item.title}...`);
+    setLoading(`Loading ${item.title}...`);
 
     try {
       const response = await fetch(`/api/v1/chapter?url=${encodeURIComponent(item.url)}`);
       const json = (await response.json()) as ApiResult<ChapterResponse>;
 
       if (!response.ok || !json.success || !json.data) {
-        throw new Error(json.error ?? "Không lấy được chương");
+        throw new Error(json.error ?? "Cannot load chapter");
       }
 
       setChapter(json.data.chapter);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Lỗi không xác định");
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading("");
     }
@@ -74,7 +74,7 @@ export default function Home() {
 
   async function downloadZip() {
     setError("");
-    setLoading("Đang scrape và đóng gói ZIP...");
+    setLoading("Scraping chapters and building ZIP...");
 
     try {
       const response = await fetch("/api/v1/download", {
@@ -89,20 +89,20 @@ export default function Home() {
 
       if (!response.ok) {
         const json = (await response.json()) as ApiResult<never>;
-        throw new Error(json.error ?? "Không tải được ZIP");
+        throw new Error(json.error ?? "Cannot download ZIP");
       }
 
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = objectUrl;
-      a.download = `${story?.metadata.title ?? "truyen"}.zip`;
+      a.download = `${story?.metadata.title ?? "story"}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(objectUrl);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Lỗi không xác định");
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading("");
     }
@@ -112,28 +112,43 @@ export default function Home() {
     <main className="shell">
       <header className="topbar">
         <div className="brand">
-          <h1>TruyenFull Scraper</h1>
-          <span>API trung gian: resolve domain, scrape live, tải ZIP về máy user.</span>
+          <h1>Story Scraper</h1>
+          <span>Pick a story from supported sources, read live, or download chapters to the user's device.</span>
         </div>
       </header>
 
       <div className="grid">
         <section className="panel">
-          <h2>Nguồn truyện</h2>
+          <h2>Story sources</h2>
+          <div className="catalog">
+            {STORY_CATALOG.map((item) => (
+              <button
+                className={`catalog-item ${url === item.url ? "active" : ""}`}
+                key={item.id}
+                onClick={() => loadStory(undefined, item.url)}
+                type="button"
+              >
+                <span>{item.source}</span>
+                <strong>{item.title}</strong>
+              </button>
+            ))}
+          </div>
+
+          <h2 className="section-title">Manual URL</h2>
           <form onSubmit={loadStory}>
             <div className="field">
-              <label htmlFor="url">URL hoặc path TruyenFull</label>
+              <label htmlFor="url">Current source URL</label>
               <input
                 id="url"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://truyenfull.vision/ten-truyen/"
+                placeholder="https://metruyenchuvn.com/story-slug"
               />
             </div>
 
             <div className="actions">
               <button className="button" disabled={Boolean(loading)} type="submit">
-                Lấy truyện
+                View story
               </button>
               <button
                 className="button secondary"
@@ -141,26 +156,28 @@ export default function Home() {
                 onClick={downloadZip}
                 type="button"
               >
-                Tải ZIP
+                Download ZIP
               </button>
             </div>
           </form>
 
-          <div className="field" style={{ marginTop: 16 }}>
-            <label htmlFor="from">Tải từ chương</label>
-            <input id="from" min="1" type="number" value={from} onChange={(event) => setFrom(event.target.value)} />
-          </div>
+          <div className="download-grid">
+            <div className="field">
+              <label htmlFor="from">Start chapter</label>
+              <input id="from" min="1" type="number" value={from} onChange={(event) => setFrom(event.target.value)} />
+            </div>
 
-          <div className="field">
-            <label htmlFor="limit">Số chương mỗi lần tải, tối đa 200</label>
-            <input
-              id="limit"
-              min="1"
-              max="200"
-              type="number"
-              value={limit}
-              onChange={(event) => setLimit(event.target.value)}
-            />
+            <div className="field">
+              <label htmlFor="limit">Chapters per download, max 200</label>
+              <input
+                id="limit"
+                min="1"
+                max="200"
+                type="number"
+                value={limit}
+                onChange={(event) => setLimit(event.target.value)}
+              />
+            </div>
           </div>
 
           {loading ? <div className="status">{loading}</div> : null}
@@ -173,7 +190,7 @@ export default function Home() {
 
         <section className="panel">
           {!story ? (
-            <div className="status">Nhập URL truyện cụ thể rồi bấm lấy truyện.</div>
+            <div className="empty-state">Choose a preset story or paste a supported story URL.</div>
           ) : (
             <>
               <div className="story">
@@ -187,9 +204,10 @@ export default function Home() {
                 <div>
                   <h2>{story.metadata.title}</h2>
                   <div className="meta">
-                    <span>{story.metadata.author || "Không rõ tác giả"}</span>
-                    <span>{story.metadata.status || "Không rõ trạng thái"}</span>
-                    <span>{story.chapters.length} chương</span>
+                    <span>{story.source}</span>
+                    <span>{story.metadata.author || "Unknown author"}</span>
+                    <span>{story.metadata.status || "Unknown status"}</span>
+                    <span>{story.chapters.length} chapters</span>
                   </div>
                   <div className="description">{story.metadata.description}</div>
                 </div>

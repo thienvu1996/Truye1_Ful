@@ -1,4 +1,5 @@
 import { TruyenFullScraper, getScraperByURL } from "@duyquangnvx/story-scraper";
+import { MeTruyenChuVnScraper } from "@/lib/custom-scrapers/metruyenchuvn";
 import { getSourceConfig, saveSourceConfig } from "@/lib/source-config-store";
 
 export const SOURCES = {
@@ -10,6 +11,11 @@ export const SOURCES = {
       "https://truyenfull.vn",
       "https://truyenfull.com",
     ],
+  },
+  metruyenchuvn: {
+    name: "metruyenchuvn",
+    label: "MeTruyenChuVN",
+    domains: ["https://metruyenchuvn.com"],
   },
 } as const;
 
@@ -28,6 +34,7 @@ type SourceHealth = {
 
 const sourceHealth: Record<SupportedSource, SourceHealth> = {
   truyenfull: {},
+  metruyenchuvn: {},
 };
 
 async function hydrateSourceHealth(source: SupportedSource) {
@@ -147,8 +154,12 @@ function canTrustRedirect(source: SupportedSource, originalDomain: string, final
 
   if (originalHost === finalHost) return true;
 
-  if (source === "truyenfull") {
-    return finalHost.includes("truyenfull");
+  if (source === "truyenfull" || source === "metruyenchuvn") {
+    return SOURCES[source].domains.some((domain) => {
+      const configuredHost = new URL(domain).hostname.replace(/^www\./, "");
+      const root = configuredHost.split(".").slice(-2).join(".");
+      return finalHost === configuredHost || finalHost.endsWith(`.${root}`) || finalHost.includes(root.split(".")[0]);
+    });
   }
 
   return false;
@@ -247,6 +258,8 @@ export function getScraper(url: string) {
   const hostname = new URL(url).hostname.replace(/^www\./, "");
   const scraper = hostname.includes("truyenfull")
     ? new TruyenFullScraper(options)
+    : hostname.includes("metruyenchuvn")
+      ? new MeTruyenChuVnScraper()
     : getScraperByURL(url, options);
 
   if (!scraper) {

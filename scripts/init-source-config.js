@@ -28,29 +28,44 @@ async function main() {
   const collection = db.collection("source_configs");
 
   await collection.createIndex({ name: 1 }, { unique: true });
-  await collection.updateOne(
-    { name: "truyenfull" },
+  const sources = [
     {
-      $set: {
-        domains: ["https://truyenfull.vision", "https://truyenfull.vn", "https://truyenfull.com"],
-        updatedAt: new Date(),
-      },
-      $setOnInsert: {
-        createdAt: new Date(),
-      },
+      name: "truyenfull",
+      domains: ["https://truyenfull.vision", "https://truyenfull.vn", "https://truyenfull.com"],
     },
-    { upsert: true },
-  );
+    {
+      name: "metruyenchuvn",
+      domains: ["https://metruyenchuvn.com"],
+    },
+  ];
 
-  const doc = await collection.findOne({ name: "truyenfull" });
+  for (const source of sources) {
+    await collection.updateOne(
+      { name: source.name },
+      {
+        $set: {
+          domains: source.domains,
+          updatedAt: new Date(),
+        },
+        $setOnInsert: {
+          createdAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+  }
+
+  const docs = await collection.find({ name: { $in: sources.map((source) => source.name) } }).toArray();
   console.log(
     JSON.stringify(
       {
         database: db.databaseName,
         collection: collection.collectionName,
-        source: doc?.name,
-        activeDomain: doc?.activeDomain,
-        domains: doc?.domains,
+        sources: docs.map((doc) => ({
+          source: doc.name,
+          activeDomain: doc.activeDomain,
+          domains: doc.domains,
+        })),
       },
       null,
       2,

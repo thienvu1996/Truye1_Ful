@@ -1,4 +1,4 @@
-export type SourceName = "truyenfull";
+export type SourceName = "truyenfull" | "metruyenchuvn";
 
 export type StoryMetadata = {
   title: string;
