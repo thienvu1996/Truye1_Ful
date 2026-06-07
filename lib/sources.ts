@@ -1,4 +1,4 @@
-import { getScraperByURL } from "@duyquangnvx/story-scraper";
+import { TruyenFullScraper, getScraperByURL } from "@duyquangnvx/story-scraper";
 
 export const SOURCES = {
   truyenfull: {
@@ -15,6 +15,19 @@ export const SOURCES = {
 export type SupportedSource = keyof typeof SOURCES;
 
 const DEFAULT_TIMEOUT_MS = 12000;
+const DOMAIN_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36";
+
+type SourceHealth = {
+  activeDomain?: string;
+  lastCheckedAt?: string;
+  redirectedFrom?: string;
+};
+
+const sourceHealth: Record<SupportedSource, SourceHealth> = {
+  truyenfull: {},
+};
 
 export function normalizePath(input: string) {
   const value = input.trim();
@@ -60,31 +73,126 @@ async function probeUrl(url: string) {
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
+        "user-agent": USER_AGENT,
       },
     });
 
-    return response.ok;
+    return {
+      ok: response.ok,
+      finalUrl: response.url,
+    };
   } catch {
-    return false;
+    return {
+      ok: false,
+      finalUrl: url,
+    };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function uniqueDomains(source: SupportedSource) {
+  const activeDomain = sourceHealth[source].activeDomain;
+  const domains = activeDomain
+    ? [activeDomain, ...SOURCES[source].domains]
+    : [...SOURCES[source].domains];
+
+  return [...new Set(domains)];
+}
+
+function isCheckFresh(source: SupportedSource) {
+  const checkedAt = sourceHealth[source].lastCheckedAt;
+
+  if (!checkedAt) return false;
+
+  return Date.now() - new Date(checkedAt).getTime() < DOMAIN_CHECK_INTERVAL_MS;
+}
+
+function getOrigin(url: string) {
+  const parsed = new URL(url);
+  return parsed.origin;
+}
+
+function canTrustRedirect(source: SupportedSource, originalDomain: string, finalUrl: string) {
+  const originalHost = new URL(originalDomain).hostname.replace(/^www\./, "");
+  const finalHost = new URL(finalUrl).hostname.replace(/^www\./, "");
+
+  if (originalHost === finalHost) return true;
+
+  if (source === "truyenfull") {
+    return finalHost.includes("truyenfull");
+  }
+
+  return false;
+}
+
+export async function checkSourceDomain(source: SupportedSource = "truyenfull") {
+  for (const domain of uniqueDomains(source)) {
+    const healthUrl = `${domain}/`;
+    const result = await probeUrl(healthUrl);
+
+    if (!result.ok || !canTrustRedirect(source, domain, result.finalUrl)) {
+      continue;
+    }
+
+    const finalOrigin = getOrigin(result.finalUrl);
+    sourceHealth[source] = {
+      activeDomain: finalOrigin,
+      lastCheckedAt: new Date().toISOString(),
+      redirectedFrom: finalOrigin === domain ? undefined : domain,
+    };
+
+    return {
+      source,
+      ...sourceHealth[source],
+      domains: SOURCES[source].domains,
+    };
+  }
+
+  sourceHealth[source] = {
+    ...sourceHealth[source],
+    lastCheckedAt: new Date().toISOString(),
+  };
+
+  throw new Error(`No working ${SOURCES[source].label} domain found`);
+}
+
+export async function getSourceHealth(source: SupportedSource = "truyenfull") {
+  if (!isCheckFresh(source)) {
+    return checkSourceDomain(source);
+  }
+
+  return {
+    source,
+    ...sourceHealth[source],
+    domains: SOURCES[source].domains,
+  };
 }
 
 export async function resolveSourceUrl(input: string, sourceName?: SupportedSource) {
   const source = sourceName ?? detectSource(input);
   const sourcePath = normalizePath(input);
 
-  for (const domain of SOURCES[source].domains) {
-    const url = `${domain}${sourcePath}`;
+  if (!isCheckFresh(source)) {
+    await checkSourceDomain(source);
+  }
 
-    if (await probeUrl(url)) {
+  for (const domain of uniqueDomains(source)) {
+    const url = `${domain}${sourcePath}`;
+    const result = await probeUrl(url);
+
+    if (result.ok && canTrustRedirect(source, domain, result.finalUrl)) {
+      const finalOrigin = getOrigin(result.finalUrl);
+      sourceHealth[source] = {
+        activeDomain: finalOrigin,
+        lastCheckedAt: new Date().toISOString(),
+        redirectedFrom: finalOrigin === domain ? undefined : domain,
+      };
+
       return {
         source,
         sourcePath,
-        url,
+        url: result.finalUrl,
       };
     }
   }
@@ -93,13 +201,16 @@ export async function resolveSourceUrl(input: string, sourceName?: SupportedSour
 }
 
 export function getScraper(url: string) {
-  const scraper = getScraperByURL(url, {
+  const options = {
     delay: 800,
     timeout: 30000,
     maxRetries: 2,
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
-  });
+    userAgent: USER_AGENT,
+  };
+  const hostname = new URL(url).hostname.replace(/^www\./, "");
+  const scraper = hostname.includes("truyenfull")
+    ? new TruyenFullScraper(options)
+    : getScraperByURL(url, options);
 
   if (!scraper) {
     throw new Error(`No scraper registered for URL: ${url}`);
