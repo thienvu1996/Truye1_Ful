@@ -7,6 +7,7 @@ export const SOURCES = {
     name: "truyenfull",
     label: "TruyenFull",
     domains: [
+      "https://truyenfull.today",
       "https://truyenfull.vision",
       "https://truyenfull.vn",
       "https://truyenfull.com",

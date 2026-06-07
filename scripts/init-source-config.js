@@ -31,7 +31,12 @@ async function main() {
   const sources = [
     {
       name: "truyenfull",
-      domains: ["https://truyenfull.vision", "https://truyenfull.vn", "https://truyenfull.com"],
+      domains: [
+        "https://truyenfull.today",
+        "https://truyenfull.vision",
+        "https://truyenfull.vn",
+        "https://truyenfull.com",
+      ],
     },
     {
       name: "metruyenchuvn",
