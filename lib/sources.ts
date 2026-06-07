@@ -1,4 +1,5 @@
 import { TruyenFullScraper, getScraperByURL } from "@duyquangnvx/story-scraper";
+import { getSourceConfig, saveSourceConfig } from "@/lib/source-config-store";
 
 export const SOURCES = {
   truyenfull: {
@@ -28,6 +29,33 @@ type SourceHealth = {
 const sourceHealth: Record<SupportedSource, SourceHealth> = {
   truyenfull: {},
 };
+
+async function hydrateSourceHealth(source: SupportedSource) {
+  try {
+    const config = await getSourceConfig(source);
+
+    if (!config) return;
+
+    sourceHealth[source] = {
+      activeDomain: config.activeDomain,
+      lastCheckedAt: config.lastCheckedAt,
+      redirectedFrom: config.redirectedFrom,
+    };
+  } catch {
+    // Mongo is optional for local/dev runs; resolver keeps working with memory cache.
+  }
+}
+
+async function persistSourceHealth(source: SupportedSource) {
+  try {
+    await saveSourceConfig(source, {
+      ...sourceHealth[source],
+      domains: [...SOURCES[source].domains],
+    });
+  } catch {
+    // Keep scrape flow alive even if config persistence is temporarily unavailable.
+  }
+}
 
 export function normalizePath(input: string) {
   const value = input.trim();
@@ -127,6 +155,8 @@ function canTrustRedirect(source: SupportedSource, originalDomain: string, final
 }
 
 export async function checkSourceDomain(source: SupportedSource = "truyenfull") {
+  await hydrateSourceHealth(source);
+
   for (const domain of uniqueDomains(source)) {
     const healthUrl = `${domain}/`;
     const result = await probeUrl(healthUrl);
@@ -141,6 +171,7 @@ export async function checkSourceDomain(source: SupportedSource = "truyenfull") 
       lastCheckedAt: new Date().toISOString(),
       redirectedFrom: finalOrigin === domain ? undefined : domain,
     };
+    await persistSourceHealth(source);
 
     return {
       source,
@@ -153,11 +184,14 @@ export async function checkSourceDomain(source: SupportedSource = "truyenfull") 
     ...sourceHealth[source],
     lastCheckedAt: new Date().toISOString(),
   };
+  await persistSourceHealth(source);
 
   throw new Error(`No working ${SOURCES[source].label} domain found`);
 }
 
 export async function getSourceHealth(source: SupportedSource = "truyenfull") {
+  await hydrateSourceHealth(source);
+
   if (!isCheckFresh(source)) {
     return checkSourceDomain(source);
   }
@@ -172,6 +206,8 @@ export async function getSourceHealth(source: SupportedSource = "truyenfull") {
 export async function resolveSourceUrl(input: string, sourceName?: SupportedSource) {
   const source = sourceName ?? detectSource(input);
   const sourcePath = normalizePath(input);
+
+  await hydrateSourceHealth(source);
 
   if (!isCheckFresh(source)) {
     await checkSourceDomain(source);
@@ -188,6 +224,7 @@ export async function resolveSourceUrl(input: string, sourceName?: SupportedSour
         lastCheckedAt: new Date().toISOString(),
         redirectedFrom: finalOrigin === domain ? undefined : domain,
       };
+      await persistSourceHealth(source);
 
       return {
         source,

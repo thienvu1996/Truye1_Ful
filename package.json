@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "init:mongo": "node scripts/init-source-config.js",
     "lint": "next lint"
   },
   "dependencies": {
     "@duyquangnvx/story-scraper": "^2.2.3",
     "jszip": "^3.10.1",
+    "mongodb": "^7.2.0",
     "next": "^15.3.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
